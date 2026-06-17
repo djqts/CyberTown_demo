@@ -4,15 +4,24 @@ app :
   port : "8080"
 
 PostgreSQL:
-    
+  DSN: "host=localhost port=15432 user=CyberTown password=123456 dbname=CyberTown sslmode=disable TimeZone=Asia/Shanghai"
 redis:
+  host: "localhost"
+  port: "6379"
   
 rabbitmq:
+  host: "localhost"
+  port: "5672"
+  user: "CyberTown"
+  password: "123456"
    
-Qdarnt:
-  
+Qdrant:
+  host: "localhost"
+  port: "6333"
+  # post: "6334" #GRPC端口，暂不使用
 
 jwt:
   secretKey: "cybertown_secret_key"
 
 slog:
+  level: "debug"

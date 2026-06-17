@@ -1,9 +1,10 @@
 package congfig
 
 import (
-	"log"
+	"os"
 
 	"github.com/spf13/viper"
+	"backend/internal/logger"
 )
 
 type Config struct {
@@ -12,31 +13,47 @@ type Config struct {
 		Port    string `mapstructure:"port"`
 		Version string `mapstructure:"version"`
 	} `mapstructure:"app"`
-	PostgreSQL struct{}
+	PostgreSQL struct{
+		DSN string `mapstructure:"dsn"`
+	}`mapstructure:"postgresql"`
 	JWT        struct {
 		SecretKey string `mapstructure:"secretkey"`
 	} `mapstructure:"jwt"`
-	Redis    struct{}
-	Slog     struct{}
-	RabbitMQ struct{}
+	Redis    struct {
+		Host     string `mapstructure:"host"`
+		Port     string `mapstructure:"port"`
+	} `mapstructure:"redis"`
+	Slog     struct{} `mapstructure:"slog"`
+	RabbitMQ struct {
+		Host     string `mapstructure:"host"`
+		Port     string `mapstructure:"port"`
+		User     string `mapstructure:"user"`
+		Password string `mapstructure:"password"`
+	} `mapstructure:"rabbitmq"`
+	Qdrant struct {
+		Host string `mapstructure:"host"`
+		Port string `mapstructure:"port"`
+	} `mapstructure:"Qdrant"`
 }
 
 var AppConfig *Config
 
-func InitConfig() {
+func InitConfig(appLog *logger.AppLogger) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath("configs/.")
 
 	err := viper.ReadInConfig()
 	if err != nil {
-		log.Fatalf("Error reading config file: %v", err)
+		appLog.Error(err, "Error reading config file")
+		os.Exit(1)
 	}
 
 	AppConfig = &Config{}
 	err = viper.Unmarshal(AppConfig)
 	if err != nil {
-		log.Fatalf("Error unmarshalling config: %v", err)
+		appLog.Error(err, "Error unmarshalling config")
+		os.Exit(1)
 	}
-	log.Printf("Config loaded successfully: %+v", AppConfig)
+	appLog.Info("Config loaded successfully", "config", AppConfig)
 }
