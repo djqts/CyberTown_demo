@@ -1,0 +1,5 @@
+*.log
+*.exe
+/configs/config.yaml
+/backend/deployments/.env
+/backend/deployments/data/
