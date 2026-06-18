@@ -7,6 +7,7 @@ import (
 	"syscall"
 	"time"
 
+	"backend/internal/broadcast"
 	config "backend/internal/config"
 	"backend/internal/event"
 	"backend/internal/infra"
@@ -16,6 +17,7 @@ import (
 	"backend/internal/scheduler"
 	"backend/internal/seed"
 	"backend/internal/service"
+	ws "backend/internal/gateway/websocket"
 	"backend/internal/worker"
 )
 
@@ -73,15 +75,27 @@ func main() {
 	// 9. Repository
 	townRepo := repo.NewTownRepo(pg.DB)
 	eventRepo := repo.NewEventRepo(pg.DB)
+	npcRepo := repo.NewNPCRepo(pg.DB)
+	scheduleRepo := repo.NewScheduleRepo(pg.DB)
+	locRepo := repo.NewLocationRepo(pg.DB)
 
 	// 10. 服务
 	townSvc := service.NewTownService(townRepo)
+	npcSvc := service.NewNPCService(npcRepo, scheduleRepo)
 
-	// 11. 调度器（每 5 秒推进 1 分钟）
+	// 11. WebSocket 网关 & 广播
+	wsServer := ws.NewServer(appLog)
+	bcastSvc := broadcast.NewService(wsServer.Hub)
+
+	// 12. 调度器（每 5 秒推进 1 分钟）
 	sched := scheduler.New(5*time.Second, 1, pub, townSvc, appLog)
 
-	// 12. 事件 Worker
-	ew := worker.NewEventWorker(cons, eventRepo, appLog)
+	// 13. Worker
+	npcWorker := worker.NewNPCWorker(npcSvc, pub, eventRepo, appLog)
+	ew := worker.NewEventWorker(cons, eventRepo, npcWorker, appLog)
+
+	bcastCons := event.NewConsumer(rmq.Channel, appLog)
+	bcastWorker := worker.NewBroadcastWorker(bcastCons, bcastSvc, eventRepo, npcRepo, locRepo, appLog)
 
 	// 13. 生命周期
 	ctx, cancel := context.WithCancel(context.Background())
@@ -90,17 +104,34 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// 启动 Worker
+	// 启动 WebSocket 网关
+	go func() {
+		if err := wsServer.Start(":" + config.AppConfig.App.Port); err != nil {
+			appLog.Error(err, "WebSocket 网关失败")
+		}
+	}()
+
+	// 启动 EventWorker
 	go func() {
 		if err := ew.Start(ctx); err != nil {
 			appLog.Error(err, "EventWorker 退出")
 		}
 	}()
 
+	// 启动 BroadcastWorker
+	go func() {
+		if err := bcastWorker.Start(ctx); err != nil {
+			appLog.Error(err, "BroadcastWorker 退出")
+		}
+	}()
+
 	// 启动调度器
 	go sched.Start(ctx)
 
-	appLog.Info("服务已启动，按 Ctrl+C 退出")
+	appLog.Info("服务已启动",
+		"http_port", config.AppConfig.App.Port,
+		"ws_path", "/ws",
+	)
 
 	// 14. 等待退出信号
 	sig := <-sigCh

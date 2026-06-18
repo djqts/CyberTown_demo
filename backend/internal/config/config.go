@@ -32,7 +32,7 @@ type Config struct {
 	} `mapstructure:"rabbitmq"`
 	Qdrant struct {
 		Host string `mapstructure:"host"`
-		Port string `mapstructure:"port"`
+		Port int    `mapstructure:"port"`
 	} `mapstructure:"Qdrant"`
 }
 

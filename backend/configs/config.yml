@@ -17,8 +17,7 @@ rabbitmq:
    
 Qdrant:
   host: "localhost"
-  port: "6333"
-  # post: "6334" #GRPC端口，暂不使用
+  port: 6334
 
 jwt:
   secretKey: "cybertown_secret_key"

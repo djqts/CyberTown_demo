@@ -318,7 +318,6 @@ RabbitMQ Management 中能看到 `town.tick` 事件持续产生。
 
 PostgreSQL `event_logs` 中能看到 tick 记录。
 
-
 ### 结果
 
   ----- event 包 — 事件协议                                                                                                                                                 
@@ -336,8 +335,6 @@ PostgreSQL `event_logs` 中能看到 tick 记录。
   │ event_worker.go │ 消费 town.tick → 写入 event_logs 表              │
 
   数据流：Scheduler → (推进时间) → TownService → (发布事件) → Publisher → RabbitMQ → Consumer → EventWorker → EventRepo → PostgreSQL
-
-
 
 ---
 
