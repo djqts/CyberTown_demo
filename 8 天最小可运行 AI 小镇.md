@@ -318,6 +318,27 @@ RabbitMQ Management 中能看到 `town.tick` 事件持续产生。
 
 PostgreSQL `event_logs` 中能看到 tick 记录。
 
+
+### 结果
+
+  ----- event 包 — 事件协议                                                                                                                                                 
+
+  │     文件      │                                           内容                                                                                             │ event.go      │ Event 结构体（event_id, event_type, town_id, actor_type, actor_id, payload, created_at） 
+  │ event_type.go │ 常量：EventTypeTownTick = "town.tick", ActorTypeSystem = "system"     
+  │ codec.go      │ Marshal / Unmarshal JSON 编解码                                                          │ publisher.go  │ Publisher — 声明 exchange + queue，Publish() 发布事件                                    │ consumer.go   │ Consumer — Consume() 循环消费，Handler 回调处理                                            ----- service / scheduler / worker — 时间推进
+
+  │ event.go      │ Event 结构体（event_id, event_type, town_id, actor_type, actor_id, payload, created_at）
+  │ event_type.go │ 常量：EventTypeTownTick = "town.tick", ActorTypeSystem = "system" │ codec.go      │ Marshal / Unmarshal JSON 编解码                                                          │ publisher.go  │ Publisher — 声明 exchange + queue，Publish() 发布事件                                 │ consumer.go   │ Consumer — Consume() 循环消费，Handler 回调处理                                          ----- service / scheduler / worker — 时间推进
+
+  │      文件       │                       内容                       │
+  │ town_service.go │ AdvanceTime() — 推进 1 分钟，>=1440 分钟跨天     │
+  │ scheduler.go    │ 定时器，每 N 秒调用 AdvanceTime + 发布 town.tick │
+  │ event_worker.go │ 消费 town.tick → 写入 event_logs 表              │
+
+  数据流：Scheduler → (推进时间) → TownService → (发布事件) → Publisher → RabbitMQ → Consumer → EventWorker → EventRepo → PostgreSQL
+
+
+
 ---
 
 ## Day 5：NPC 日程与移动
