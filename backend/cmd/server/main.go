@@ -7,6 +7,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
+
+	"backend/internal/agent"
 	"backend/internal/broadcast"
 	config "backend/internal/config"
 	"backend/internal/event"
@@ -24,6 +27,9 @@ import (
 func main() {
 	// 1. 日志
 	appLog := logger.NewApp("debug", true)
+
+	// 1.5 加载 .env 环境变量
+	_ = godotenv.Load()
 
 	// 2. 配置
 	config.InitConfig(appLog)
@@ -78,26 +84,43 @@ func main() {
 	npcRepo := repo.NewNPCRepo(pg.DB)
 	scheduleRepo := repo.NewScheduleRepo(pg.DB)
 	locRepo := repo.NewLocationRepo(pg.DB)
+	chatRepo := repo.NewChatRepo(pg.DB)
 
 	// 10. 服务
 	townSvc := service.NewTownService(townRepo)
 	npcSvc := service.NewNPCService(npcRepo, scheduleRepo)
-
 	// 11. WebSocket 网关 & 广播
-	wsServer := ws.NewServer(appLog)
+	wsServer := ws.NewServer(appLog, pub)
 	bcastSvc := broadcast.NewService(wsServer.Hub)
 
-	// 12. 调度器（每 5 秒推进 1 分钟）
+	// 12. Agent (Eino + LLM)
+	llmCfg := agent.LoadLLMConfig()
+	appLog.Info("LLM 配置",
+		"model", llmCfg.Model,
+		"base_url", llmCfg.BaseURL,
+	)
+	einoChatModel, err := agent.NewChatModel(context.Background(), llmCfg)
+	if err != nil {
+		appLog.Error(err, "初始化 Eino ChatModel 失败")
+		os.Exit(1)
+	}
+	einoRunner := agent.NewEinoRunner(einoChatModel)
+	agentSvc := agent.NewAgentService(npcRepo, chatRepo, einoRunner)
+
+	// 13. 调度器（每 5 秒推进 1 分钟）
 	sched := scheduler.New(5*time.Second, 1, pub, townSvc, appLog)
 
-	// 13. Worker
+	// 14. Worker
 	npcWorker := worker.NewNPCWorker(npcSvc, pub, eventRepo, appLog)
 	ew := worker.NewEventWorker(cons, eventRepo, npcWorker, appLog)
 
 	bcastCons := event.NewConsumer(rmq.Channel, appLog)
-	bcastWorker := worker.NewBroadcastWorker(bcastCons, bcastSvc, eventRepo, npcRepo, locRepo, appLog)
+	bcastWorker := worker.NewBroadcastWorker(bcastCons, bcastSvc, eventRepo, npcRepo, locRepo, wsServer.Hub, appLog)
 
-	// 13. 生命周期
+	agentCons := event.NewConsumer(rmq.Channel, appLog)
+	agentWorker := worker.NewAgentWorker(agentCons, agentSvc, pub, wsServer.Hub, appLog)
+
+	// 15. 生命周期
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -125,6 +148,13 @@ func main() {
 		}
 	}()
 
+	// 启动 AgentWorker
+	go func() {
+		if err := agentWorker.Start(ctx); err != nil {
+			appLog.Error(err, "AgentWorker 退出")
+		}
+	}()
+
 	// 启动调度器
 	go sched.Start(ctx)
 
@@ -133,7 +163,7 @@ func main() {
 		"ws_path", "/ws",
 	)
 
-	// 14. 等待退出信号
+	// 16. 等待退出信号
 	sig := <-sigCh
 	appLog.Info("收到退出信号", "signal", sig.String())
 	cancel()
