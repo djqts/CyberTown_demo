@@ -10,6 +10,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"backend/internal/agent"
+	"backend/internal/app"
 	"backend/internal/broadcast"
 	config "backend/internal/config"
 	"backend/internal/event"
@@ -114,6 +115,27 @@ func main() {
 	locRepo := repo.NewLocationRepo(pg.DB)
 	chatRepo := repo.NewChatRepo(pg.DB)
 
+	// 9.5 Redis & Qdrant
+	redisClient, err := infra.NewRedisClient(appLog)
+	if err != nil {
+		appLog.Error(err, "Redis 初始化失败")
+		os.Exit(1)
+	}
+	defer redisClient.Close()
+
+	qdrantClient, err := infra.NewQdrantClient(appLog)
+	if err != nil {
+		appLog.Error(err, "Qdrant 初始化失败")
+		os.Exit(1)
+	}
+	defer qdrantClient.Close()
+
+	// 9.6 记忆系统
+	memSvc := app.InitMemory(context.Background(), &app.Infra{
+		Redis:  redisClient.Client,
+		Qdrant: qdrantClient.Client,
+	}, appLog)
+
 	// 10. 服务
 	townSvc := service.NewTownService(townRepo)
 	npcSvc := service.NewNPCService(npcRepo, scheduleRepo)
@@ -133,7 +155,7 @@ func main() {
 		os.Exit(1)
 	}
 	einoRunner := agent.NewEinoRunner(einoChatModel)
-	agentSvc := agent.NewAgentService(npcRepo, chatRepo, einoRunner)
+	agentSvc := agent.NewAgentService(npcRepo, chatRepo, einoRunner, memSvc)
 
 	// 13. 调度器（每 5 秒推进 1 分钟）
 	sched := scheduler.New(5*time.Second, 1, pub, townSvc, appLog)

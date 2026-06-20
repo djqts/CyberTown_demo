@@ -7,7 +7,7 @@ PostgreSQL:
   DSN: "host=localhost port=15432 user=CyberTown password=123456 dbname=CyberTown sslmode=disable TimeZone=Asia/Shanghai"
 redis:
   host: "localhost"
-  port: "6379"
+  port: "6380"
   
 rabbitmq:
   host: "localhost"
