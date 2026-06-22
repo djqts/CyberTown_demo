@@ -13,6 +13,7 @@ import (
 	"backend/internal/broadcast"
 	config "backend/internal/config"
 	"backend/internal/event"
+	ws "backend/internal/gateway/websocket"
 	"backend/internal/infra"
 	"backend/internal/logger"
 	"backend/internal/model"
@@ -20,7 +21,6 @@ import (
 	"backend/internal/scheduler"
 	"backend/internal/seed"
 	"backend/internal/service"
-	ws "backend/internal/gateway/websocket"
 	"backend/internal/worker"
 )
 
@@ -68,15 +68,43 @@ func main() {
 	}
 	defer rmq.Close()
 
+	publishCh, err := rmq.Conn.Channel()
+	if err != nil {
+		appLog.Error(err, "create RabbitMQ publish channel failed")
+		os.Exit(1)
+	}
+	defer publishCh.Close()
+
+	eventCh, err := rmq.Conn.Channel()
+	if err != nil {
+		appLog.Error(err, "create RabbitMQ event channel failed")
+		os.Exit(1)
+	}
+	defer eventCh.Close()
+
+	broadcastCh, err := rmq.Conn.Channel()
+	if err != nil {
+		appLog.Error(err, "create RabbitMQ broadcast channel failed")
+		os.Exit(1)
+	}
+	defer broadcastCh.Close()
+
+	agentCh, err := rmq.Conn.Channel()
+	if err != nil {
+		appLog.Error(err, "create RabbitMQ agent channel failed")
+		os.Exit(1)
+	}
+	defer agentCh.Close()
+
 	// 7. 事件发布者
-	pub, err := event.NewPublisher(rmq.Channel, appLog)
+	pub, err := event.NewPublisher(publishCh, appLog)
 	if err != nil {
 		appLog.Error(err, "创建 Publisher 失败")
 		os.Exit(1)
 	}
 
 	// 8. 事件消费者
-	cons := event.NewConsumer(rmq.Channel, appLog)
+	cons := event.NewConsumer(eventCh, appLog)
 
 	// 9. Repository
 	townRepo := repo.NewTownRepo(pg.DB)
@@ -114,10 +142,10 @@ func main() {
 	npcWorker := worker.NewNPCWorker(npcSvc, pub, eventRepo, appLog)
 	ew := worker.NewEventWorker(cons, eventRepo, npcWorker, appLog)
 
-	bcastCons := event.NewConsumer(rmq.Channel, appLog)
+	bcastCons := event.NewConsumer(broadcastCh, appLog)
 	bcastWorker := worker.NewBroadcastWorker(bcastCons, bcastSvc, eventRepo, npcRepo, locRepo, wsServer.Hub, appLog)
 
-	agentCons := event.NewConsumer(rmq.Channel, appLog)
+	agentCons := event.NewConsumer(agentCh, appLog)
 	agentWorker := worker.NewAgentWorker(agentCons, agentSvc, pub, wsServer.Hub, appLog)
 
 	// 15. 生命周期

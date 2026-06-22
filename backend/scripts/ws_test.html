@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CyberTown NPC 对话测试</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; display: flex; height: 100vh; }
+.sidebar { width: 280px; background: #16213e; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+.sidebar h2 { color: #e94560; font-size: 18px; }
+.sidebar label { font-size: 13px; color: #a0a0b0; }
+.sidebar input, .sidebar select { width: 100%; padding: 8px 12px; border: 1px solid #333; border-radius: 6px; background: #0f3460; color: #fff; font-size: 14px; }
+.sidebar button { padding: 10px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600; }
+.btn-connect { background: #e94560; color: #fff; }
+.btn-connect:hover { background: #d63851; }
+.btn-disconnect { background: #444; color: #ccc; }
+.status { font-size: 12px; padding: 6px 10px; border-radius: 4px; }
+.status.on { background: #1a4a1a; color: #4caf50; }
+.status.off { background: #4a1a1a; color: #f44336; }
+.chat-area { flex: 1; display: flex; flex-direction: column; }
+.chat-header { padding: 16px 20px; background: #16213e; border-bottom: 1px solid #333; font-size: 16px; }
+.messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.msg { max-width: 75%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.msg.user { align-self: flex-end; background: #e94560; color: #fff; }
+.msg.npc  { align-self: flex-start; background: #0f3460; color: #e0e0e0; }
+.msg .sender { font-size: 11px; color: #999; margin-bottom: 4px; }
+.input-area { display: flex; padding: 16px 20px; gap: 10px; background: #16213e; border-top: 1px solid #333; }
+.input-area input { flex: 1; padding: 10px 14px; border: 1px solid #333; border-radius: 8px; background: #0f3460; color: #fff; font-size: 14px; }
+.input-area button { padding: 10px 20px; background: #e94560; border: none; border-radius: 8px; color: #fff; font-weight: 600; cursor: pointer; }
+.input-area button:disabled { background: #555; cursor: not-allowed; }
+.npc-list { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="sidebar">
+  <h2>CyberTown</h2>
+  <div>
+    <label>用户名</label>
+    <input id="userToken" value="player1" placeholder="player1">
+  </div>
+  <div>
+    <label>NPC</label>
+    <div class="npc-list">
+      <label><input type="radio" name="npc" value="1" checked> 莉娜 (咖啡师)</label>
+      <label><input type="radio" name="npc" value="2"> 奥托 (钟表匠)</label>
+      <label><input type="radio" name="npc" value="3"> 米娅 (邮差)</label>
+    </div>
+  </div>
+  <button id="btnConnect" class="btn-connect" onclick="connect()">连接</button>
+  <button id="btnDisconnect" class="btn-disconnect" onclick="disconnect()" disabled>断开</button>
+  <div id="status" class="status off">未连接</div>
+</div>
+<div class="chat-area">
+  <div class="chat-header" id="chatHeader">选择 NPC 并连接</div>
+  <div class="messages" id="messages"></div>
+  <div class="input-area">
+    <input id="input" placeholder="输入消息..." disabled onkeydown="if(event.key==='Enter')send()">
+    <button id="btnSend" onclick="send()" disabled>发送</button>
+  </div>
+</div>
+<script>
+let ws=null,npcNames={1:'莉娜',2:'奥托',3:'米娅'};
+function connect(){
+  if(ws)ws.close();
+  const token=document.getElementById('userToken').value||'player1';
+  ws=new WebSocket('ws://localhost:8080/ws?user_token='+token);
+  ws.onopen=()=>{
+    setStatus(true);
+    document.getElementById('input').disabled=false;
+    document.getElementById('btnSend').disabled=false;
+    document.getElementById('btnConnect').disabled=true;
+    document.getElementById('btnDisconnect').disabled=false;
+    const npcId=document.querySelector('input[name="npc"]:checked').value;
+    document.getElementById('chatHeader').textContent='与 '+npcNames[npcId]+' 对话中';
+    addMsg('system','已连接到晨曦镇...');
+  };
+  ws.onmessage=(e)=>{
+    const msg=JSON.parse(e.data);
+    if(msg.type==='npc.replied'&&msg.data) addMsg('npc',msg.data.content);
+  };
+  ws.onclose=()=>{
+    setStatus(false);
+    document.getElementById('input').disabled=true;
+    document.getElementById('btnSend').disabled=true;
+    document.getElementById('btnConnect').disabled=false;
+    document.getElementById('btnDisconnect').disabled=true;
+    addMsg('system','连接已断开');
+  };
+  ws.onerror=()=>addMsg('system','连接错误');
+}
+function disconnect(){if(ws)ws.close();}
+function send(){
+  if(!ws||ws.readyState!==WebSocket.OPEN)return;
+  const input=document.getElementById('input');
+  const text=input.value.trim();
+  if(!text)return;
+  const npcId=parseInt(document.querySelector('input[name="npc"]:checked').value)||1;
+  ws.send(JSON.stringify({type:'user.message',data:{npc_id:npcId,content:text}}));
+  addMsg('user',text);
+  input.value='';
+}
+function addMsg(role,text){
+  const div=document.createElement('div');
+  div.className='msg '+(role==='user'?'user':role==='npc'?'npc':'');
+  if(role==='system')div.style.cssText='align-self:center;background:transparent;color:#666;font-size:12px;';
+  div.textContent=text;
+  const msgs=document.getElementById('messages');
+  msgs.appendChild(div);
+  msgs.scrollTop=msgs.scrollHeight;
+}
+function setStatus(on){
+  const s=document.getElementById('status');
+  s.className='status '+(on?'on':'off');
+  s.textContent=on?'已连接':'未连接';
+}
+</script>
+</body>
+</html>
