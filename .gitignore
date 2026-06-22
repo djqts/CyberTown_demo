@@ -3,3 +3,5 @@
 /configs/config.yaml
 /backend/deployments/.env
 /backend/deployments/data/
+backend\.env
+*.env
