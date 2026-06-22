@@ -10,50 +10,58 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
+	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )
 
-// LLMConfig 从环境变量加载的 LLM 配置。
 type LLMConfig struct {
 	APIKey  string
 	BaseURL string
 	Model   string
 }
 
-// LoadLLMConfig 从环境变量读取 LLM 配置。
 func LoadLLMConfig() LLMConfig {
-	return LLMConfig{
+	cfg := LLMConfig{
 		APIKey:  os.Getenv("LLM_API_KEY"),
 		BaseURL: os.Getenv("LLM_BASE_URL"),
 		Model:   os.Getenv("LLM_MODEL"),
 	}
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = "http://localhost:11434/v1"
+	}
+	if cfg.Model == "" {
+		cfg.Model = "qwen2.5:3b"
+	}
+	if cfg.APIKey == "" && strings.Contains(cfg.BaseURL, "localhost:11434") {
+		cfg.APIKey = "ollama"
+	}
+	return cfg
 }
 
-// ChatModel 统一的对话模型接口，兼容 OpenAI 和 Ollama。
 type ChatModel struct {
 	cfg        LLMConfig
 	httpClient *http.Client
 	isOllama   bool
 }
 
-// NewChatModel 创建 ChatModel 实例。
-func NewChatModel(ctx context.Context, cfg LLMConfig) (*ChatModel, error) {
+func NewChatModel(_ context.Context, cfg LLMConfig) (*ChatModel, error) {
 	return &ChatModel{
-		cfg:        cfg,
-		httpClient: &http.Client{},
-		isOllama:   cfg.APIKey == "ollama",
+		cfg: cfg,
+		httpClient: &http.Client{
+			Timeout: 60 * time.Second,
+		},
+		isOllama: cfg.APIKey == "ollama",
 	}, nil
 }
 
-// ---- OpenAI 兼容格式 ----
-
 type openAIRequest struct {
-	Model       string        `json:"model"`
-	Messages    []chatMsg     `json:"messages"`
-	MaxTokens   int           `json:"max_tokens,omitempty"`
-	Temperature float32       `json:"temperature,omitempty"`
-	Stream      bool          `json:"stream"`
+	Model       string    `json:"model"`
+	Messages    []chatMsg `json:"messages"`
+	MaxTokens   int       `json:"max_tokens,omitempty"`
+	Temperature float32   `json:"temperature,omitempty"`
+	Stream      bool      `json:"stream"`
 }
 
 type chatMsg struct {
@@ -69,8 +77,6 @@ type openAIResponse struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
 }
-
-// ---- Ollama 原生格式 ----
 
 type ollamaRequest struct {
 	Model          string        `json:"model"`
@@ -90,8 +96,8 @@ type ollamaResponse struct {
 	Done    bool    `json:"done"`
 }
 
-// Generate 发送消息到 LLM 并返回回复。
-func (cm *ChatModel) Generate(ctx context.Context, messages []*schema.Message) (*schema.Message, error) {
+func (cm *ChatModel) Generate(ctx context.Context, messages []*schema.Message, opts ...einomodel.Option) (*schema.Message, error) {
+	commonOpts := einomodel.GetCommonOptions(&einomodel.Options{}, opts...)
 	chatMsgs := make([]chatMsg, len(messages))
 	for i, m := range messages {
 		chatMsgs[i] = chatMsg{
@@ -101,21 +107,29 @@ func (cm *ChatModel) Generate(ctx context.Context, messages []*schema.Message) (
 	}
 
 	if cm.isOllama {
-		return cm.callOllama(ctx, chatMsgs)
+		return cm.callOllama(ctx, chatMsgs, commonOpts)
 	}
-	return cm.callOpenAI(ctx, chatMsgs)
+	return cm.callOpenAI(ctx, chatMsgs, commonOpts)
 }
 
-func (cm *ChatModel) callOllama(ctx context.Context, msgs []chatMsg) (*schema.Message, error) {
+func (cm *ChatModel) Stream(ctx context.Context, messages []*schema.Message, opts ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
+	resp, err := cm.Generate(ctx, messages, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return schema.StreamReaderFromArray([]*schema.Message{resp}), nil
+}
+
+func (cm *ChatModel) callOllama(ctx context.Context, msgs []chatMsg, opts *einomodel.Options) (*schema.Message, error) {
 	f := false
 	reqBody := ollamaRequest{
-		Model:          cm.cfg.Model,
+		Model:          optionModel(opts, cm.cfg.Model),
 		Messages:       msgs,
 		Stream:         false,
 		EnableThinking: &f,
 		Options: ollamaOptions{
-			Temperature: 0.8,
-			NumPredict:  512,
+			Temperature: optionTemperature(opts, 0.8),
+			NumPredict:  optionMaxTokens(opts, 512),
 		},
 	}
 
@@ -125,7 +139,7 @@ func (cm *ChatModel) callOllama(ctx context.Context, msgs []chatMsg) (*schema.Me
 	}
 
 	url := strings.TrimSuffix(cm.cfg.BaseURL, "/v1") + "/api/chat"
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -137,7 +151,7 @@ func (cm *ChatModel) callOllama(ctx context.Context, msgs []chatMsg) (*schema.Me
 	}
 	defer resp.Body.Close()
 
-	if resp.Header.Get("Content-Type") == "application/x-ndjson" {
+	if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/x-ndjson") {
 		return cm.parseOllamaStream(resp.Body)
 	}
 
@@ -145,8 +159,7 @@ func (cm *ChatModel) callOllama(ctx context.Context, msgs []chatMsg) (*schema.Me
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
-
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("ollama api error %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -154,23 +167,18 @@ func (cm *ChatModel) callOllama(ctx context.Context, msgs []chatMsg) (*schema.Me
 	if err := json.Unmarshal(respBody, &or); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
-
 	if or.Message.Content == "" {
 		return nil, fmt.Errorf("empty response from ollama")
 	}
-
-	return &schema.Message{
-		Role:    schema.Assistant,
-		Content: or.Message.Content,
-	}, nil
+	return schema.AssistantMessage(or.Message.Content, nil), nil
 }
 
-func (cm *ChatModel) callOpenAI(ctx context.Context, msgs []chatMsg) (*schema.Message, error) {
+func (cm *ChatModel) callOpenAI(ctx context.Context, msgs []chatMsg, opts *einomodel.Options) (*schema.Message, error) {
 	reqBody := openAIRequest{
-		Model:       cm.cfg.Model,
+		Model:       optionModel(opts, cm.cfg.Model),
 		Messages:    msgs,
-		MaxTokens:   2048,
-		Temperature: 0.8,
+		MaxTokens:   optionMaxTokens(opts, 2048),
+		Temperature: optionTemperature(opts, 0.8),
 		Stream:      false,
 	}
 
@@ -180,7 +188,7 @@ func (cm *ChatModel) callOpenAI(ctx context.Context, msgs []chatMsg) (*schema.Me
 	}
 
 	url := strings.TrimSuffix(cm.cfg.BaseURL, "/") + "/chat/completions"
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -199,8 +207,7 @@ func (cm *ChatModel) callOpenAI(ctx context.Context, msgs []chatMsg) (*schema.Me
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
-
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("llm api error %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -208,11 +215,9 @@ func (cm *ChatModel) callOpenAI(ctx context.Context, msgs []chatMsg) (*schema.Me
 	if err := json.Unmarshal(respBody, &cr); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
-
 	if cr.Error != nil {
 		return nil, fmt.Errorf("llm error: %s", cr.Error.Message)
 	}
-
 	if len(cr.Choices) == 0 {
 		return nil, fmt.Errorf("empty response")
 	}
@@ -221,14 +226,9 @@ func (cm *ChatModel) callOpenAI(ctx context.Context, msgs []chatMsg) (*schema.Me
 	if content == "" {
 		return nil, fmt.Errorf("empty response content")
 	}
-
-	return &schema.Message{
-		Role:    schema.Assistant,
-		Content: content,
-	}, nil
+	return schema.AssistantMessage(content, nil), nil
 }
 
-// parseOllamaStream 解析 Ollama NDJSON 流式响应。
 func (cm *ChatModel) parseOllamaStream(body io.Reader) (*schema.Message, error) {
 	var fullContent strings.Builder
 	scanner := bufio.NewScanner(body)
@@ -253,9 +253,26 @@ func (cm *ChatModel) parseOllamaStream(body io.Reader) (*schema.Message, error) 
 	if content == "" {
 		return nil, fmt.Errorf("empty stream response")
 	}
+	return schema.AssistantMessage(content, nil), nil
+}
 
-	return &schema.Message{
-		Role:    schema.Assistant,
-		Content: content,
-	}, nil
+func optionModel(opts *einomodel.Options, fallback string) string {
+	if opts != nil && opts.Model != nil {
+		return *opts.Model
+	}
+	return fallback
+}
+
+func optionTemperature(opts *einomodel.Options, fallback float32) float32 {
+	if opts != nil && opts.Temperature != nil {
+		return *opts.Temperature
+	}
+	return fallback
+}
+
+func optionMaxTokens(opts *einomodel.Options, fallback int) int {
+	if opts != nil && opts.MaxTokens != nil {
+		return *opts.MaxTokens
+	}
+	return fallback
 }

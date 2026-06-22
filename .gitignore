@@ -1,7 +1,7 @@
 *.log
 *.exe
 /configs/config.yaml
-/backend/deployments/.env
 /backend/deployments/data/
-backend\.env
+backend/.env
 *.env
+backend/docs/*.md

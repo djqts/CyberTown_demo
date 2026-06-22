@@ -72,7 +72,7 @@ services:
       - ./data/qdrant:/qdrant/storage
     # user: "${UID:-1000}:${GID:-1000}"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      test: ["CMD", "bash", "-c", "</dev/tcp/localhost/6333"]
       interval: 10s
       timeout: 5s
       retries: 5

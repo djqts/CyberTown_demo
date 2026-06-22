@@ -154,8 +154,12 @@ func main() {
 		appLog.Error(err, "初始化 Eino ChatModel 失败")
 		os.Exit(1)
 	}
-	einoRunner := agent.NewEinoRunner(einoChatModel)
-	agentSvc := agent.NewAgentService(npcRepo, chatRepo, einoRunner, memSvc)
+	einoRunner, err := agent.NewEinoRunner(context.Background(), einoChatModel, memSvc)
+	if err != nil {
+		appLog.Error(err, "compile Eino agent chain failed")
+		os.Exit(1)
+	}
+	agentSvc := agent.NewAgentService(npcRepo, chatRepo, einoRunner, memSvc, appLog)
 
 	// 13. 调度器（每 5 秒推进 1 分钟）
 	sched := scheduler.New(5*time.Second, 1, pub, townSvc, appLog)
@@ -168,7 +172,7 @@ func main() {
 	bcastWorker := worker.NewBroadcastWorker(bcastCons, bcastSvc, eventRepo, npcRepo, locRepo, wsServer.Hub, appLog)
 
 	agentCons := event.NewConsumer(agentCh, appLog)
-	agentWorker := worker.NewAgentWorker(agentCons, agentSvc, pub, wsServer.Hub, appLog)
+	agentWorker := worker.NewAgentWorker(agentCons, agentSvc, pub, appLog)
 
 	// 15. 生命周期
 	ctx, cancel := context.WithCancel(context.Background())

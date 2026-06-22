@@ -5,39 +5,33 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"backend/internal/agent"
 	"backend/internal/event"
 	ws "backend/internal/gateway/websocket"
 	"backend/internal/logger"
 )
 
-// AgentWorker 消费 user.message.sent 事件，调用 Agent 生成 NPC 回复。
+// AgentWorker consumes user messages and publishes NPC replies.
 type AgentWorker struct {
 	consumer  consumer
 	agentSvc  agentReplier
 	publisher eventPublisher
-	hub       userMessenger
 	appLog    *logger.AppLogger
 }
 
-// NewAgentWorker 创建 Agent Worker。
 func NewAgentWorker(
-	consumer *event.Consumer,
-	agentSvc *agent.AgentService,
-	publisher *event.Publisher,
-	hub *ws.Hub,
+	consumer consumer,
+	agentSvc agentReplier,
+	publisher eventPublisher,
 	appLog *logger.AppLogger,
 ) *AgentWorker {
 	return &AgentWorker{
 		consumer:  consumer,
 		agentSvc:  agentSvc,
 		publisher: publisher,
-		hub:       hub,
 		appLog:    appLog,
 	}
 }
 
-// Start 从 user_events 队列消费事件。
 func (w *AgentWorker) Start(ctx context.Context) error {
 	return w.consumer.Consume(ctx, "user_events", w.handleEvent)
 }
@@ -57,19 +51,17 @@ func (w *AgentWorker) handleUserMessageSent(ctx context.Context, e *event.Event)
 		return fmt.Errorf("parse user.message.sent payload: %w", err)
 	}
 
-	w.appLog.Info("处理用户消息",
+	w.appLog.Info("processing user message",
 		"npc_id", userMsg.NPCID,
 		"user_token", userMsg.UserToken,
 	)
 
-	// 调用 Agent 生成回复
 	reply, err := w.agentSvc.GenerateReply(ctx, userMsg.NPCID, userMsg.Content, userMsg.UserToken)
 	if err != nil {
-		w.appLog.Error(err, "Agent 生成回复失败", "npc_id", userMsg.NPCID)
+		w.appLog.Error(err, "agent reply generation failed", "npc_id", userMsg.NPCID)
 		return fmt.Errorf("agent generate reply: %w", err)
 	}
 
-	// 发布 npc.replied 事件
 	payload, _ := json.Marshal(ws.NPCReplied{
 		NPCID:     userMsg.NPCID,
 		NPCName:   "",
@@ -91,17 +83,7 @@ func (w *AgentWorker) handleUserMessageSent(ctx context.Context, e *event.Event)
 		return fmt.Errorf("publish npc.replied: %w", err)
 	}
 
-	// 同时直接推送给 WebSocket 用户
-	w.hub.SendToUser(userMsg.UserToken, &ws.Message{
-		Type: ws.MsgTypeNPCReplied,
-		Data: ws.NPCReplied{
-			NPCID:     userMsg.NPCID,
-			Content:   reply,
-			UserToken: userMsg.UserToken,
-		},
-	})
-
-	w.appLog.Info("NPC 回复已推送",
+	w.appLog.Info("npc reply event published",
 		"npc_id", userMsg.NPCID,
 		"user_token", userMsg.UserToken,
 	)
