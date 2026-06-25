@@ -47,6 +47,15 @@ func (r *EventRepo) Delete(id uint) error {
 	return r.db.Delete(&model.EventLog{}, id).Error
 }
 
+func (r *EventRepo) FindRecent(townID uint, limit int) ([]model.EventLog, error) {
+	var events []model.EventLog
+	err := r.db.Where("town_id = ?", townID).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&events).Error
+	return events, err
+}
+
 func (r *EventRepo) DeleteByTownID(townID uint) error {
 	return r.db.Where("town_id = ?", townID).Delete(&model.EventLog{}).Error
 }

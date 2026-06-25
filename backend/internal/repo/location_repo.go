@@ -30,6 +30,15 @@ func (r *LocationRepo) FindByID(id uint) (*model.Location, error) {
 	return &loc, nil
 }
 
+func (r *LocationRepo) FindByName(townID int64, name string) (*model.Location, error) {
+	var loc model.Location
+	err := r.db.Where("town_id = ? AND name = ?", townID, name).First(&loc).Error
+	if err != nil {
+		return nil, err
+	}
+	return &loc, nil
+}
+
 func (r *LocationRepo) FindByTownID(townID int64) ([]model.Location, error) {
 	var locs []model.Location
 	err := r.db.Where("town_id = ?", townID).

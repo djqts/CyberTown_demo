@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>晨曦镇 · CyberTown</title>
+    <style>
+      #godot-status {
+        position: absolute; left: 0; right: 0; top: 0; bottom: 0;
+        background-color: #242424; display: flex; flex-direction: column;
+        justify-content: center; align-items: center; visibility: hidden; z-index: 20;
+      }
+      #godot-status-progress { display: none; bottom: 10%; width: 50%; margin: 0 auto; }
+      #godot-status-notice {
+        display: none; background-color: #5b3943; border-radius: 0.5rem;
+        border: 1px solid #9b3943; color: #e0e0e0;
+        font-family: sans-serif; line-height: 1.3;
+        margin: 0 2rem; overflow: hidden; padding: 1rem; text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      console.log('[diag] window.__diag initialized');
+      window.__diag = {
+        entries: [],
+        record(type, data) {
+          this.entries.push({ time: Date.now(), type, data: data || {} });
+          if (this.entries.length > 500) this.entries = this.entries.slice(-300);
+        },
+        report() {
+          const byType = {};
+          for (const e of this.entries) { byType[e.type] = (byType[e.type] || 0) + 1; }
+          const moved = this.entries.filter(e => e.type === "npc.moved");
+          console.table(byType);
+          console.log("npc.moved:", moved.length);
+          for (const m of moved.slice(-15)) {
+            console.log("  " + (m.data.npc_name || "?") + ": " + (m.data.from_location || "?") + " -> " + (m.data.to_location || "?") + "  [ids: " + (m.data.from_location_id || 0) + "->" + (m.data.to_location_id || 0) + "]");
+          }
+          return { total: this.entries.length, byType, movedCount: moved.length, moved: moved.slice(-20) };
+        },
+        clear() { this.entries = []; },
+      };
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+
+    <!-- Godot engine script -->
+    <script src="/godot/index.js"></script>
+    <script>
+      window.__godotStart = async function(canvas) {
+        if (window.__godotStarted) return;
+        window.__godotStarted = true;
+        if (!window.Engine) {
+          console.error('Godot Engine not found');
+          return;
+        }
+        try {
+          const CB = "?v=" + Date.now();
+          const wasmResp = await fetch("/index.wasm" + CB);
+          if (!wasmResp.ok) throw new Error("WASM fetch: " + wasmResp.status);
+          const wasmBuf = await wasmResp.arrayBuffer();
+          const wasmBin = new Uint8Array(wasmBuf);
+
+          const config = {
+            canvas: canvas,
+            wasmBinary: wasmBin,
+            instantiateWasm: function(imports, successCallback) {
+              WebAssembly.instantiate(wasmBin, imports).then(function(r) {
+                successCallback(r.instance, r.module);
+              });
+              return {};
+            },
+            locateFile: function(path) {
+              // Try root first (public/), fallback to /godot/
+              return path;
+            },
+            args: [],
+            canvasResizePolicy: 2,
+            executable: "godot/index",
+            experimentalVK: false,
+            fileSizes: { "index.pck": 17166060, "index.wasm": 39509339 },
+            focusCanvas: false,
+            gdextensionLibs: [],
+          };
+          const engine = new Engine(config);
+
+          const statusOverlay = document.getElementById('godot-status');
+          const statusProgress = document.getElementById('godot-status-progress');
+          const statusNotice = document.getElementById('godot-status-notice');
+
+          if (statusOverlay) statusOverlay.style.visibility = 'visible';
+          if (statusProgress) statusProgress.style.display = 'block';
+
+          engine.startGame({
+            onProgress: function(current, total) {
+              if (current > 0 && total > 0 && statusProgress) {
+                statusProgress.value = current;
+                statusProgress.max = total;
+              }
+            },
+          }).then(function() {
+            if (statusOverlay) statusOverlay.style.visibility = 'hidden';
+            window.__godotReady = true;
+          }).catch(function(err) {
+            console.error('Godot start error:', err);
+            if (statusNotice) {
+              statusNotice.style.display = 'block';
+              statusNotice.textContent = err.message || String(err);
+            }
+          });
+        } catch(e) {
+          console.error('Godot init error:', e);
+        }
+      };
+    </script>
+  </body>
+</html>

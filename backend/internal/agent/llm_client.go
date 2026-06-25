@@ -177,8 +177,8 @@ func (cm *ChatModel) callOpenAI(ctx context.Context, msgs []chatMsg, opts *einom
 	reqBody := openAIRequest{
 		Model:       optionModel(opts, cm.cfg.Model),
 		Messages:    msgs,
-		MaxTokens:   optionMaxTokens(opts, 2048),
-		Temperature: optionTemperature(opts, 0.8),
+		MaxTokens:   optionMaxTokens(opts, 256),
+		Temperature: optionTemperature(opts, 0.7),
 		Stream:      false,
 	}
 

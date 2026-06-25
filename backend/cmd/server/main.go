@@ -2,20 +2,26 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"net/http"
+
 	"github.com/joho/godotenv"
 
 	"backend/internal/agent"
 	"backend/internal/app"
+	"backend/internal/behavior"
 	"backend/internal/broadcast"
 	config "backend/internal/config"
 	"backend/internal/event"
+	h "backend/internal/gateway/http"
 	ws "backend/internal/gateway/websocket"
 	"backend/internal/infra"
+	"backend/internal/interaction"
 	"backend/internal/logger"
 	"backend/internal/model"
 	"backend/internal/repo"
@@ -52,6 +58,8 @@ func main() {
 		&model.NPCSchedule{},
 		&model.ChatMessage{},
 		&model.EventLog{},
+		&model.NPCRelationship{},
+		&model.StoryEvent{},
 	); err != nil {
 		appLog.Error(err, "自动建表失败")
 		os.Exit(1)
@@ -98,7 +106,10 @@ func main() {
 	defer agentCh.Close()
 
 	// 7. 事件发布者
-	pub, err := event.NewPublisher(publishCh, appLog)
+	rmqDSN := fmt.Sprintf("amqp://%s:%s@%s:%s/",
+		config.AppConfig.RabbitMQ.User, config.AppConfig.RabbitMQ.Password,
+		config.AppConfig.RabbitMQ.Host, config.AppConfig.RabbitMQ.Port)
+	pub, err := event.NewPublisher(publishCh, rmq.Conn, rmqDSN, appLog)
 	if err != nil {
 		appLog.Error(err, "创建 Publisher 失败")
 		os.Exit(1)
@@ -162,17 +173,90 @@ func main() {
 	agentSvc := agent.NewAgentService(npcRepo, chatRepo, einoRunner, memSvc, appLog)
 
 	// 13. 调度器（每 5 秒推进 1 分钟）
-	sched := scheduler.New(5*time.Second, 1, pub, townSvc, appLog)
+	sched := scheduler.New(30*time.Second, 1, pub, townSvc, appLog)
 
 	// 14. Worker
-	npcWorker := worker.NewNPCWorker(npcSvc, pub, eventRepo, appLog)
-	ew := worker.NewEventWorker(cons, eventRepo, npcWorker, appLog)
+	// 单独的 channel 用于 npc 移动事件，避免被 Activity/Interaction/Story Worker 抢占
+	npcEventCh, err := rmq.Conn.Channel()
+	if err != nil {
+		appLog.Error(err, "create RabbitMQ npc event channel failed")
+		os.Exit(1)
+	}
+	defer npcEventCh.Close()
+	npcCons := event.NewConsumer(npcEventCh, appLog)
+
+	relRepo := repo.NewRelationshipRepo(pg.DB)
+	interSvc := interaction.NewService(relRepo, npcRepo, appLog)
+	npcWorker := worker.NewNPCWorker(npcSvc, pub, eventRepo, interSvc.MarkMoved, appLog)
+	ew := worker.NewEventWorker(cons, npcCons, eventRepo, npcWorker, appLog)
 
 	bcastCons := event.NewConsumer(broadcastCh, appLog)
 	bcastWorker := worker.NewBroadcastWorker(bcastCons, bcastSvc, eventRepo, npcRepo, locRepo, wsServer.Hub, appLog)
 
 	agentCons := event.NewConsumer(agentCh, appLog)
 	agentWorker := worker.NewAgentWorker(agentCons, agentSvc, pub, appLog)
+
+	// ActivityWorker（Day 9: NPC 主动行为）
+	activityCh, err := rmq.Conn.Channel()
+	if err != nil {
+		appLog.Error(err, "create RabbitMQ activity channel failed")
+		os.Exit(1)
+	}
+	defer activityCh.Close()
+
+	activityCons := event.NewConsumer(activityCh, appLog)
+	behavSvc := behavior.NewBehaviorService(appLog)
+	actGen := agent.NewActivityGenerator(einoRunner)
+	activityWorker := worker.NewActivityWorker(activityCons, pub, eventRepo, behavSvc, npcRepo,
+		func(ctx context.Context, npc *model.NPC, reason string) (string, error) {
+			return actGen.Generate(ctx, npc, reason)
+		}, appLog)
+
+	// InteractionWorker（Day 10: NPC 互动）
+	interCh, err := rmq.Conn.Channel()
+	if err != nil {
+		appLog.Error(err, "create RabbitMQ interaction channel failed")
+		os.Exit(1)
+	}
+	defer interCh.Close()
+
+	interCons := event.NewConsumer(interCh, appLog)
+	interGen := agent.NewInteractionGenerator(einoRunner)
+	interactionWorker := worker.NewInteractionWorker(interCons, pub, eventRepo, interSvc,
+		func(ctx context.Context, a, b *model.NPC) (*interaction.InteractionResult, error) {
+			dialogue, moodChanges, relDelta, err := interGen.Generate(ctx, a, b)
+			if err != nil {
+				return nil, err
+			}
+			var lines []interaction.DialogueLine
+			for _, d := range dialogue {
+				lines = append(lines, interaction.DialogueLine{Speaker: d.Speaker, Speech: d.Speech, Action: d.Action, Emotion: d.Emotion})
+			}
+			mc := make(map[uint]string)
+			if moodChanges != nil {
+				for name, mood := range moodChanges {
+					if name == a.Name { mc[a.ID] = mood }
+					if name == b.Name { mc[b.ID] = mood }
+				}
+			}
+			var relDeltas []interaction.RelDelta
+			if relDelta != 0 {
+				relDeltas = append(relDeltas, interaction.RelDelta{FromNPCID: a.ID, ToNPCID: b.ID, Delta: relDelta, Reason: "conversation"})
+			}
+			return &interaction.InteractionResult{Dialogue: lines, MoodChanges: mc, RelDeltas: relDeltas}, nil
+		}, appLog)
+
+	// StoryWorker（Day 11: 故事事件）
+	storyCh, err := rmq.Conn.Channel()
+	if err != nil {
+		appLog.Error(err, "create RabbitMQ story channel failed")
+		os.Exit(1)
+	}
+	defer storyCh.Close()
+
+	storyCons := event.NewConsumer(storyCh, appLog)
+	storyRepo := repo.NewStoryRepo(pg.DB)
+	storyWorker := worker.NewStoryWorker(storyCons, pub, eventRepo, storyRepo, npcRepo, appLog)
 
 	// 15. 生命周期
 	ctx, cancel := context.WithCancel(context.Background())
@@ -181,10 +265,31 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// 启动 WebSocket 网关
+	// 启动 Hub（处理 WS 客户端注册/广播/定向推送）
+	go wsServer.Hub.Run()
+
+	// 启动 HTTP+WS 服务（共用端口）
+	httpMux := h.NewRouter(townRepo, npcRepo, eventRepo, locRepo, relRepo, pg.DB, pub, appLog,
+		func(eventType string, data map[string]any) {
+			bcastSvc.Push(eventType, data)
+		})
+	// Wire diagnostics: memory + gossip inspection
+	h.SetDiagRedis(redisClient.Client)
+	h.SetDiagGossip(func(npcID uint) string {
+		npc, err := npcRepo.FindByID(npcID)
+		if err != nil {
+			return ""
+		}
+		return interSvc.HearGossip(npcID, npc.LocationID)
+	})
+	httpMux.Handle("/ws", wsServer.Handler())
+	corsHandler := h.CorsMiddleware(httpMux)
+
 	go func() {
-		if err := wsServer.Start(":" + config.AppConfig.App.Port); err != nil {
-			appLog.Error(err, "WebSocket 网关失败")
+		addr := ":" + config.AppConfig.App.Port
+		appLog.Info("HTTP+WS 服务启动", "addr", addr)
+		if err := http.ListenAndServe(addr, corsHandler); err != nil {
+			appLog.Error(err, "HTTP 服务失败")
 		}
 	}()
 
@@ -206,6 +311,27 @@ func main() {
 	go func() {
 		if err := agentWorker.Start(ctx); err != nil {
 			appLog.Error(err, "AgentWorker 退出")
+		}
+	}()
+
+	// 启动 ActivityWorker
+	go func() {
+		if err := activityWorker.Start(ctx); err != nil {
+			appLog.Error(err, "ActivityWorker 退出")
+		}
+	}()
+
+	// 启动 InteractionWorker
+	go func() {
+		if err := interactionWorker.Start(ctx); err != nil {
+			appLog.Error(err, "InteractionWorker 退出")
+		}
+	}()
+
+	// 启动 StoryWorker
+	go func() {
+		if err := storyWorker.Start(ctx); err != nil {
+			appLog.Error(err, "StoryWorker 退出")
 		}
 	}()
 

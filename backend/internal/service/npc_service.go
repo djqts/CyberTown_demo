@@ -59,6 +59,11 @@ func (s *NPCService) FindActiveMoves(townID uint, minuteOfDay int) ([]NPCMove, e
 	return moves, nil
 }
 
+// FindByTownID 查找城镇中的所有 NPC。
+func (s *NPCService) FindByTownID(townID uint) ([]model.NPC, error) {
+	return s.npcRepo.FindByTownID(townID)
+}
+
 // MoveNPC 更新 NPC 位置和状态。
 func (s *NPCService) MoveNPC(npcID, newLocationID uint) error {
 	npc, err := s.npcRepo.FindByID(npcID)
@@ -71,7 +76,7 @@ func (s *NPCService) MoveNPC(npcID, newLocationID uint) error {
 	}
 
 	npc.LocationID = newLocationID
-	npc.Status = "moving"
+	npc.Status = "idle"
 
 	return s.npcRepo.Update(npc)
 }

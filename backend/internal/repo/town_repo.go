@@ -31,6 +31,19 @@ func (r *TownRepo) FindByID(id uint) (*model.Town, error) {
 	return &town, nil
 }
 
+func (r *TownRepo) FindFirst() (*model.Town, error) {
+	var town model.Town
+	err := r.db.
+		Preload("Locations").
+		Preload("NPCs").
+		Preload("Events").
+		First(&town).Error
+	if err != nil {
+		return nil, err
+	}
+	return &town, nil
+}
+
 func (r *TownRepo) FindByName(name string) (*model.Town, error) {
 	var town model.Town
 	err := r.db.Where("name = ?", name).

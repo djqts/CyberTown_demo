@@ -1,0 +1,16 @@
+{
+  "name": "cybertown",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c green,blue \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && go run ./cmd/server/",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:infra": "docker compose -f backend/deployments/docker-compose.yml up -d",
+    "dev:infra:down": "docker compose -f backend/deployments/docker-compose.yml down",
+    "dev:stack": "docker compose -f backend/deployments/docker-compose.yml up -d && concurrently -n infra,backend,frontend -c yellow,green,blue \"docker compose -f backend/deployments/docker-compose.yml logs -f\" \"npm run dev:backend\" \"npm run dev:frontend\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0"
+  }
+}

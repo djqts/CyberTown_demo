@@ -35,15 +35,15 @@ func NewAgentService(
 	}
 }
 
-func (s *AgentService) GenerateReply(ctx context.Context, npcID uint, userMsg, userToken string) (string, error) {
+func (s *AgentService) GenerateReply(ctx context.Context, npcID uint, userMsg, userToken string) (string, string, error) {
 	npc, err := s.npcRepo.FindByID(npcID)
 	if err != nil {
-		return "", fmt.Errorf("find npc %d: %w", npcID, err)
+		return "", "", fmt.Errorf("find npc %d: %w", npcID, err)
 	}
 
 	history, err := s.chatRepo.FindByNPCAndUser(npcID, userToken, 20)
 	if err != nil {
-		return "", fmt.Errorf("find history: %w", err)
+		return "", "", fmt.Errorf("find history: %w", err)
 	}
 	for i, j := 0, len(history)-1; i < j; i, j = i+1, j-1 {
 		history[i], history[j] = history[j], history[i]
@@ -52,31 +52,23 @@ func (s *AgentService) GenerateReply(ctx context.Context, npcID uint, userMsg, u
 	simpleAgent := NewSimpleAgent(npc, s.einoRunner)
 	reply, err := simpleAgent.GenerateReply(ctx, userMsg, userToken, history, "")
 	if err != nil {
-		return "", fmt.Errorf("generate reply: %w", err)
+		return "", "", fmt.Errorf("generate reply: %w", err)
 	}
 
-	if err := s.chatRepo.Save(&model.ChatMessage{
-		NPCID:     npcID,
-		UserToken: userToken,
-		Role:      "user",
-		Content:   userMsg,
-	}); err != nil {
-		return "", fmt.Errorf("save user message: %w", err)
-	}
-	if err := s.chatRepo.Save(&model.ChatMessage{
-		NPCID:     npcID,
-		UserToken: userToken,
-		Role:      "npc",
-		Content:   reply,
-	}); err != nil {
-		return "", fmt.Errorf("save npc reply: %w", err)
-	}
-
-	if s.memSvc != nil {
-		if err := s.memSvc.Memorize(ctx, npcID, userToken, userMsg, reply); err != nil && s.appLog != nil {
-			s.appLog.Error(err, "memory write failed; reply already persisted", "npc_id", npcID, "user_token", userToken)
+	// Async: save chat history and memory — don't block the reply
+	go func() {
+		_ = s.chatRepo.Save(&model.ChatMessage{
+			NPCID: npcID, UserToken: userToken, Role: "user", Content: userMsg,
+		})
+		_ = s.chatRepo.Save(&model.ChatMessage{
+			NPCID: npcID, UserToken: userToken, Role: "npc", Content: reply,
+		})
+		if s.memSvc != nil {
+			if err := s.memSvc.Memorize(context.Background(), npcID, userToken, userMsg, reply); err != nil && s.appLog != nil {
+				s.appLog.Error(err, "async memory write failed", "npc_id", npcID)
+			}
 		}
-	}
+	}()
 
-	return reply, nil
+	return npc.Name, reply, nil
 }

@@ -27,11 +27,11 @@ type fakeAgentReplier struct {
 	reply     string
 }
 
-func (a *fakeAgentReplier) GenerateReply(_ context.Context, npcID uint, userMsg, userToken string) (string, error) {
+func (a *fakeAgentReplier) GenerateReply(_ context.Context, npcID uint, userMsg, userToken string) (string, string, error) {
 	a.npcID = npcID
 	a.userMsg = userMsg
 	a.userToken = userToken
-	return a.reply, nil
+	return "TestNPC", a.reply, nil
 }
 
 func TestAgentWorkerPublishesNPCRepliedEvent(t *testing.T) {
@@ -80,5 +80,8 @@ func TestAgentWorkerPublishesNPCRepliedEvent(t *testing.T) {
 	}
 	if reply.NPCID != 3 || reply.UserToken != "player1" || reply.Content != "The square is lively today." {
 		t.Fatalf("reply payload = %+v", reply)
+	}
+	if reply.NPCName != "TestNPC" {
+		t.Fatalf("reply NPCName = %q, want %q", reply.NPCName, "TestNPC")
 	}
 }

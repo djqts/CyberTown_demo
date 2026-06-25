@@ -3,8 +3,8 @@ package congfig
 import (
 	"os"
 
-	"github.com/spf13/viper"
 	"backend/internal/logger"
+	"github.com/spf13/viper"
 )
 
 type Config struct {
@@ -13,15 +13,15 @@ type Config struct {
 		Port    string `mapstructure:"port"`
 		Version string `mapstructure:"version"`
 	} `mapstructure:"app"`
-	PostgreSQL struct{
+	PostgreSQL struct {
 		DSN string `mapstructure:"dsn"`
-	}`mapstructure:"postgresql"`
-	JWT        struct {
+	} `mapstructure:"postgresql"`
+	JWT struct {
 		SecretKey string `mapstructure:"secretkey"`
 	} `mapstructure:"jwt"`
-	Redis    struct {
-		Host     string `mapstructure:"host"`
-		Port     string `mapstructure:"port"`
+	Redis struct {
+		Host string `mapstructure:"host"`
+		Port string `mapstructure:"port"`
 	} `mapstructure:"redis"`
 	Slog     struct{} `mapstructure:"slog"`
 	RabbitMQ struct {

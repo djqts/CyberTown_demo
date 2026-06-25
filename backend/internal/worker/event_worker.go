@@ -13,30 +13,38 @@ import (
 
 // EventWorker 消费事件并分发到对应处理器。
 type EventWorker struct {
-	consumer  consumer
-	eventRepo eventLogCreator
-	npcWorker *NPCWorker
-	appLog    *logger.AppLogger
+	tickConsumer consumer
+	npcConsumer  consumer
+	eventRepo    eventLogCreator
+	npcWorker    *NPCWorker
+	appLog       *logger.AppLogger
 }
 
 // NewEventWorker 创建事件 Worker。
 func NewEventWorker(
-	consumer consumer,
+	tickConsumer consumer,
+	npcConsumer consumer,
 	eventRepo eventLogCreator,
 	npcWorker *NPCWorker,
 	appLog *logger.AppLogger,
 ) *EventWorker {
 	return &EventWorker{
-		consumer:  consumer,
-		eventRepo: eventRepo,
-		npcWorker: npcWorker,
-		appLog:    appLog,
+		tickConsumer: tickConsumer,
+		npcConsumer:  npcConsumer,
+		eventRepo:    eventRepo,
+		npcWorker:    npcWorker,
+		appLog:       appLog,
 	}
 }
 
-// Start 开始消费 town_events 队列中的事件。
+// Start 开始消费 town_tick_event（tick）和 npc_events（移动）队列的事件。
 func (w *EventWorker) Start(ctx context.Context) error {
-	return w.consumer.Consume(ctx, "town_events", w.handleEvent)
+	go func() {
+		if err := w.tickConsumer.Consume(ctx, "town_tick_event", w.handleEvent); err != nil {
+			w.appLog.Error(err, "EventWorker town_events 退出")
+		}
+	}()
+	return w.npcConsumer.Consume(ctx, "npc_events", w.handleEvent)
 }
 
 func (w *EventWorker) handleEvent(ctx context.Context, e *event.Event) error {

@@ -1,104 +1,114 @@
-# CyberTown — NPC 对话系统 Demo
+# 🌸 CyberTown — AI 小镇
 
-基于事件驱动的 AI 小镇 NPC 对话系统，使用 DeepSeek/Ollama 作为 LLM 后端，支持短期记忆（Redis）和长期记忆（Qdrant）。
+基于事件驱动的 AI 虚拟小镇。15 个 NPC 拥有独立人格、日程、情绪和记忆，在 Godot 地图中自主生活。支持自然语言对话（DeepSeek LLM），实时 WebSocket 事件推送，React 前端 + Go 后端。
 
 ## 快速启动
 
-### 1. 环境要求
-
-- Go 1.25+
-- Docker Desktop
-- （可选）Ollama 本地模型
-
-### 2. 启动基础设施
+### 1. 安装依赖
 
 ```bash
-cd backend/deployments
-cp .env.example .env          # 首次运行，按需修改密码
-docker compose up -d          # 启动 PostgreSQL / Redis / RabbitMQ / Qdrant
-docker compose ps             # 确认所有服务 healthy
+npm install          # 根目录（concurrently）
+cd frontend && npm install   # 前端依赖
 ```
 
-### 3. 配置 LLM
+### 2. 配置 LLM
 
-编辑 `backend/.env`：
+复制并编辑 `backend/.env`（参考 `backend/.env.example`）：
 
-```bash
-# DeepSeek API（推荐，响应 ~2s）
+```env
 LLM_API_KEY=sk-your-key
 LLM_BASE_URL=https://api.deepseek.com/v1
 LLM_MODEL=deepseek-chat
-
-# 或 Ollama 本地模型
-# LLM_API_KEY=ollama
-# LLM_BASE_URL=http://localhost:11434/v1
-# LLM_MODEL=qwen2.5:3b
 ```
 
-### 4. 启动服务
+### 3. 一键启动
+
+```bash
+# 仅前后端（PostgreSQL / Redis / RabbitMQ / Qdrant 需先手动拉起）
+npm run dev
+
+# 全栈启动（Docker Compose 基础设施 + 后端 + 前端）
+npm run dev:stack
+```
+
+浏览器打开 `http://localhost:5173`
+
+### npm 脚本速览
+
+| 命令                       | 作用                                                              |
+| ------------------------ | --------------------------------------------------------------- |
+| `npm run dev`            | 并行启动后端 + 前端                                                     |
+| `npm run dev:infra`      | Docker Compose 后台启动（PG:15432, Redis:6380, MQ:5672, Qdrant:6334） |
+| `npm run dev:infra:down` | 停止 Docker Compose 栈                                             |
+| `npm run dev:stack`      | 全栈启动（infra + backend + frontend，带 infra 日志流）                    |
+
+### 手动启动（备选）
+
+**基础设施：**
+
+```bash
+cd backend/deployments
+docker compose up -d
+```
+
+**后端：**
 
 ```bash
 cd backend
-go run ./cmd/server/
+go run ./cmd/server/       # HTTP+WS → :8080
 ```
 
-启动后自动完成：创建数据库表 → 导入种子数据（3 个 NPC、7 条日程）→ 初始化 Qdrant 记忆库 → 导入世界知识。
-
-### 5. 开始对话
-
-浏览器打开 `backend/scripts/ws_test.html`，选择 NPC 并发送消息。
-
-或命令行测试：
+**前端：**
 
 ```bash
-# 安装 wscat: npm i -g wscat
-wscat -c "ws://localhost:8080/ws?user_token=player1"
-# 发送:
-{"type":"user.message","data":{"npc_id":1,"content":"你好，你是谁？"}}
+cd frontend
+npm install
+npm run dev                 # Vite → :5173
 ```
 
-## 架构
+## 项目结构
 
 ```
-Client (WebSocket) → RabbitMQ → AgentWorker → AgentService → LLM API
-                           ↓                        ↓
-                      EventWorker              MemoryService
-                           ↓                   ↙          ↘
-                    BroadcastWorker        Redis (短期)   Qdrant (长期)
-                           ↓
-                  WebSocket (push)
+CT2/
+├── backend/                # Go 后端 (:8080)
+│   ├── cmd/server/         # 入口
+│   ├── internal/           # agent/behavior/interaction/story/emotion/...
+│   ├── configs/            # config.yml
+│   └── deployments/        # docker-compose.yml · .env
+├── frontend/               # React 19 + Vite + Tailwind
+│   ├── src/                # components/store/lib
+│   └── public/godot/       # Godot HTML5 导出
+├── package.json            # 根 npm 脚本（npm run dev / dev:stack）
+└── README.md               # 项目文档
 ```
 
-| 组件 | 说明 |
-|------|------|
-| `gateway/websocket` | WebSocket 连接管理、消息收发 |
-| `event` | RabbitMQ 事件发布/消费 |
-| `worker` | 异步事件处理器（NPC 移动、广播、Agent） |
-| `agent` | NPC 对话编排（Eino + LLM HTTP） |
-| `memory` | 短期记忆（Redis）+ 长期记忆（Qdrant）+ 世界知识 |
-| `model/repo/service` | 数据层三层结构 |
+## 技术栈
 
-## 可用 NPC
+| 层   | 技术                                                         |
+| --- | ---------------------------------------------------------- |
+| 前端  | React 19 · TypeScript · Vite 8 · Tailwind · GSAP · Zustand |
+| 地图  | Godot 4.7 (HTML5/WASM)                                     |
+| 后端  | Go 1.25 · GORM · gorilla/websocket                         |
+| 消息  | RabbitMQ (事件驱动)                                            |
+| 存储  | PostgreSQL 17 · Redis 7 · Qdrant (向量)                      |
+| AI  | DeepSeek Chat API · Eino (CloudWeGo)                       |
 
-| ID | 名字 | 职业 | 性格 | 位置 |
-|----|------|------|------|------|
-| 1 | 莉娜 | 咖啡师 | 热情开朗 | 咖啡馆 |
-| 2 | 奥托 | 钟表匠 | 沉默寡言 | 钟楼 |
-| 3 | 米娅 | 邮差 | 好奇心旺盛 | 广场 |
+## 15 个 NPC
 
-## 常用命令
-
-```bash
-# RabbitMQ 管理面板
-open http://localhost:15672  # 账号见 deployments/.env
-
-# 数据库管理（Adminer）
-open http://localhost:8081   # 系统选 PostgreSQL
-
-# 查看日志
-tail -f /tmp/cybertown-*.log
-
-# 清理重建
-docker compose -f backend/deployments/docker-compose.yml down -v
-docker compose -f backend/deployments/docker-compose.yml up -d
-```
+| 姓名  | 职业    | 初始情绪      |
+| --- | ----- | --------- |
+| 埃德蒙 | 镇长    | content   |
+| 莉娜  | 咖啡馆主  | cheerful  |
+| 艾琳  | 图书管理员 | calm      |
+| 菲奥娜 | 花店店主  | happy     |
+| 奥托  | 铁匠    | focused   |
+| 克莱尔 | 医生    | composed  |
+| 杰克  | 农夫    | content   |
+| 沃尔特 | 渔夫    | peaceful  |
+| 索菲亚 | 教师    | warm      |
+| 皮埃尔 | 面包师   | jolly     |
+| 玛莎  | 酒馆老板  | friendly  |
+| 卢卡斯 | 音乐家   | dreamy    |
+| 托马斯 | 木匠    | steady    |
+| 米娅  | 小女孩   | playful   |
+| 薇拉  | 冒险者   | confident |

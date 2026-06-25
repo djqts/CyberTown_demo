@@ -48,6 +48,9 @@ func (c *Consumer) Consume(ctx context.Context, queue string, handler Handler) e
 				msg.Nack(false, false)
 				continue
 			}
+			if queue == "town_broadcast" {
+				c.appLog.Info("事件已接收(broadcast)", "event_type", e.EventType, "event_id", e.EventID)
+			}
 			if err := handler(ctx, e); err != nil {
 				c.appLog.Error(err, "事件处理失败", "event_type", e.EventType, "event_id", e.EventID)
 				msg.Nack(false, true)

@@ -1,7 +1,13 @@
 *.log
 *.exe
+*.exe~
 /configs/config.yaml
 /backend/deployments/data/
 backend/.env
-*.env
-backend/docs/*.md
+backend/docs/
+docs
+.gopath
+.agents
+.tmp
+!backend/docs/整体设计.md
+!backend/docs/详细设计.md

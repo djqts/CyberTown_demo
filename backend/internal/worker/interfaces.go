@@ -24,10 +24,11 @@ type eventLogCreator interface {
 type npcMoveService interface {
 	FindActiveMoves(townID uint, minuteOfDay int) ([]service.NPCMove, error)
 	MoveNPC(npcID, newLocationID uint) error
+	FindByTownID(townID uint) ([]model.NPC, error)
 }
 
 type agentReplier interface {
-	GenerateReply(ctx context.Context, npcID uint, userMsg, userToken string) (string, error)
+	GenerateReply(ctx context.Context, npcID uint, userMsg, userToken string) (npcName string, reply string, err error)
 }
 
 type broadcastPusher interface {
@@ -40,8 +41,16 @@ type npcFinder interface {
 
 type locationFinder interface {
 	FindByID(id uint) (*model.Location, error)
+	FindByName(townID int64, name string) (*model.Location, error)
 }
 
 type userMessenger interface {
 	SendToUser(userToken string, msg *ws.Message)
+}
+
+type npcStatusUpdater interface {
+	FindByTownID(townID uint) ([]model.NPC, error)
+	UpdateFull(npc *model.NPC) error
+	UpdateMood(npcID uint, mood string) error
+	UpdateGoal(npcID uint, goal string) error
 }

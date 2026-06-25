@@ -18,13 +18,13 @@ docker compose down -v        # 同时删除数据卷
 
 ## 服务清单
 
-| 服务 | 镜像 | 宿主机端口 | 容器内地址 | 健康检查 |
-|------|------|-----------|-----------|----------|
-| postgres | postgres:17-alpine | `${POSTGRES_PORT:-15432}` | `postgres:15432` | `pg_isready` |
-| redis | redis:7-alpine | `${REDIS_PORT:-6379}` | `redis:6379` | `redis-cli ping` |
-| rabbitmq | rabbitmq:4-management-alpine | `${RABBITMQ_PORT:-5672}`, `${RABBITMQ_MGMT_PORT:-15672}` | `rabbitmq:5672` | `rabbitmq-diagnostics` |
-| qdrant | qdrant/qdrant:latest | `${QDRANT_REST_PORT:-6333}`, `${QDRANT_GRPC_PORT:-6334}` | `qdrant:6333` | `curl /health` |
-| adminer | adminer:latest | `${ADMINER_PORT:-8081}` | — | — |
+| 服务       | 镜像                           | 宿主机端口                                                    | 容器内地址            | 健康检查                   |
+| -------- | ---------------------------- | -------------------------------------------------------- | ---------------- | ---------------------- |
+| postgres | postgres:17-alpine           | `${POSTGRES_PORT:-15432}`                                | `postgres:15432` | `pg_isready`           |
+| redis    | redis:7-alpine               | `${REDIS_PORT:-6379}`                                    | `redis:6379`     | `redis-cli ping`       |
+| rabbitmq | rabbitmq:4-management-alpine | `${RABBITMQ_PORT:-5672}`, `${RABBITMQ_MGMT_PORT:-15672}` | `rabbitmq:5672`  | `rabbitmq-diagnostics` |
+| qdrant   | qdrant/qdrant:latest         | `${QDRANT_REST_PORT:-6333}`, `${QDRANT_GRPC_PORT:-6334}` | `qdrant:6333`    | `curl /health`         |
+| adminer  | adminer:latest               | `${ADMINER_PORT:-8081}`                                  | —                | —                      |
 
 所有服务加入同一 bridge 网络 `cybertown-net`，容器间通过**服务名**互相访问。
 
@@ -78,13 +78,13 @@ docker compose up -d
 
 访问 `http://localhost:${ADMINER_PORT:-8081}`：
 
-| 字段 | 值 |
-|------|-----|
-| 系统 | PostgreSQL |
-| 服务器 | `postgres` |
-| 用户名 | 见 `.env` 中 `POSTGRES_USER` |
-| 密码 | 见 `.env` 中 `POSTGRES_PASSWORD` |
-| 数据库 | 见 `.env` 中 `POSTGRES_DB` |
+| 字段  | 值                              |
+| --- | ------------------------------ |
+| 系统  | PostgreSQL                     |
+| 服务器 | `postgres`                     |
+| 用户名 | 见 `.env` 中 `POSTGRES_USER`     |
+| 密码  | 见 `.env` 中 `POSTGRES_PASSWORD` |
+| 数据库 | 见 `.env` 中 `POSTGRES_DB`       |
 
 ## RabbitMQ 管理 UI
 

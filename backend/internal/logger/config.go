@@ -39,9 +39,9 @@ type Config struct {
 // defaultConfig 返回应用选项前的基准配置。
 func defaultConfig() Config {
 	return Config{
-		level:         slog.LevelInfo,
-		format:        FormatJSON,
-		addSource:     true,
+		level:        slog.LevelInfo,
+		format:       FormatJSON,
+		addSource:    true,
 		stackOnError: true,
 	}
 }

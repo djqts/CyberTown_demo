@@ -27,6 +27,10 @@ func (s *fakeNPCMoveService) MoveNPC(npcID, newLocationID uint) error {
 	return nil
 }
 
+func (s *fakeNPCMoveService) FindByTownID(uint) ([]model.NPC, error) {
+	return nil, nil
+}
+
 type fakePublisher struct {
 	events []*event.Event
 }
@@ -46,7 +50,7 @@ func TestNPCWorkerHandleMoveRequestedPublishesMovedWithFromAndTo(t *testing.T) {
 	ctx := context.Background()
 	npcSvc := &fakeNPCMoveService{}
 	publisher := &fakePublisher{}
-	worker := NewNPCWorker(npcSvc, publisher, &fakeEventLogRepo{}, logger.NewApp("error", false))
+	worker := NewNPCWorker(npcSvc, publisher, &fakeEventLogRepo{}, nil, logger.NewApp("error", false))
 
 	payload, err := json.Marshal(map[string]any{
 		"npc_id":           7,

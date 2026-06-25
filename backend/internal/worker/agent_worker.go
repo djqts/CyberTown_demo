@@ -51,20 +51,18 @@ func (w *AgentWorker) handleUserMessageSent(ctx context.Context, e *event.Event)
 		return fmt.Errorf("parse user.message.sent payload: %w", err)
 	}
 
-	w.appLog.Info("processing user message",
-		"npc_id", userMsg.NPCID,
-		"user_token", userMsg.UserToken,
-	)
+	w.appLog.Info("[STEP2] AgentWorker正在处理", "npc_id", userMsg.NPCID, "user_token", userMsg.UserToken)
 
-	reply, err := w.agentSvc.GenerateReply(ctx, userMsg.NPCID, userMsg.Content, userMsg.UserToken)
+	npcName, reply, err := w.agentSvc.GenerateReply(ctx, userMsg.NPCID, userMsg.Content, userMsg.UserToken)
 	if err != nil {
-		w.appLog.Error(err, "agent reply generation failed", "npc_id", userMsg.NPCID)
+		w.appLog.Error(err, "[STEP2-FAIL] LLM生成失败", "npc_id", userMsg.NPCID)
 		return fmt.Errorf("agent generate reply: %w", err)
 	}
+	w.appLog.Info("[STEP3] LLM回复已生成", "npc_id", userMsg.NPCID, "reply_len", len(reply))
 
 	payload, _ := json.Marshal(ws.NPCReplied{
 		NPCID:     userMsg.NPCID,
-		NPCName:   "",
+		NPCName:   npcName,
 		Content:   reply,
 		UserToken: userMsg.UserToken,
 	})
@@ -83,9 +81,6 @@ func (w *AgentWorker) handleUserMessageSent(ctx context.Context, e *event.Event)
 		return fmt.Errorf("publish npc.replied: %w", err)
 	}
 
-	w.appLog.Info("npc reply event published",
-		"npc_id", userMsg.NPCID,
-		"user_token", userMsg.UserToken,
-	)
+	w.appLog.Info("[STEP4] npc.replied 已发布到RabbitMQ", "npc_id", userMsg.NPCID, "user_token", userMsg.UserToken)
 	return nil
 }

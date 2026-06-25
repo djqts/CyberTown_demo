@@ -28,6 +28,13 @@ func NewServer(appLog *logger.AppLogger, publisher eventPublisher) *Server {
 	}
 }
 
+// Handler 返回 WebSocket upgrade handler，供 http.ServeMux 挂载。
+func (s *Server) Handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ServeWS(s.Hub, w, r, s.onUserMessage)
+	})
+}
+
 // Start 启动 Hub 并监听 WebSocket 连接。
 func (s *Server) Start(addr string) error {
 	go s.Hub.Run()
@@ -42,9 +49,11 @@ func (s *Server) Start(addr string) error {
 
 // onUserMessage 接收用户消息并发布 user.message.sent 事件。
 func (s *Server) onUserMessage(userToken string, raw []byte) {
+	s.appLog.Info("WS收到消息", "user_token", userToken, "raw", string(raw)[:min(len(raw), 120)])
+
 	var msg Message
 	if err := json.Unmarshal(raw, &msg); err != nil {
-		s.appLog.Warn("WebSocket 消息解析失败", "user_token", userToken, "raw", string(raw))
+		s.appLog.Warn("WebSocket 消息解析失败", "user_token", userToken, "err", err.Error())
 		return
 	}
 
@@ -53,10 +62,10 @@ func (s *Server) onUserMessage(userToken string, raw []byte) {
 		return
 	}
 
-	data, _ := json.Marshal(msg.Data)
 	var userMsg UserMessage
+	data, _ := json.Marshal(msg.Data)
 	if err := json.Unmarshal(data, &userMsg); err != nil {
-		s.appLog.Warn("用户消息数据解析失败", "user_token", userToken)
+		s.appLog.Warn("用户消息数据解析失败", "user_token", userToken, "err", err.Error())
 		return
 	}
 	userMsg.UserToken = userToken
@@ -73,7 +82,9 @@ func (s *Server) onUserMessage(userToken string, raw []byte) {
 	}
 
 	if err := s.publisher.Publish(context.Background(), e); err != nil {
-		s.appLog.Error(err, "发布 user.message.sent 失败", "user_token", userToken)
+		s.appLog.Error(err, "[STEP1-FAIL] 发布 user.message.sent 失败", "user_token", userToken)
+	} else {
+		s.appLog.Info("[STEP1] WS→RabbitMQ user.message.sent 已发布", "npc_id", userMsg.NPCID)
 	}
 }
 

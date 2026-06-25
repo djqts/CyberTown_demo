@@ -10,7 +10,7 @@ type Location struct {
 	Latitude  string `json:"latitude"`
 
 	// 关联
-	Town      Town       `json:"town" gorm:"foreignKey:TownID"`
-	NPCs      []NPC      `json:"npcs" gorm:"foreignKey:location_id"`
+	Town      Town          `json:"town" gorm:"foreignKey:TownID"`
+	NPCs      []NPC         `json:"npcs" gorm:"foreignKey:location_id"`
 	Schedules []NPCSchedule `json:"schedules" gorm:"foreignKey:location_id"`
 }

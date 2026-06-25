@@ -48,7 +48,10 @@ func (r *NPCRepo) FindByLocationID(locationID uint) ([]model.NPC, error) {
 }
 
 func (r *NPCRepo) Update(npc *model.NPC) error {
-	return r.db.Save(npc).Error
+	return r.db.Model(&model.NPC{}).Where("id = ?", npc.ID).Updates(map[string]any{
+		"location_id": npc.LocationID,
+		"status":      npc.Status,
+	}).Error
 }
 
 func (r *NPCRepo) UpdateLocation(npcID, locationID uint) error {
@@ -61,8 +64,34 @@ func (r *NPCRepo) UpdateStatus(npcID uint, status string) error {
 		Update("status", status).Error
 }
 
-func (r *NPCRepo) Delete(id uint) error {
-	return r.db.Delete(&model.NPC{}, id).Error
+// UpdateFull 更新 NPC 所有可变字段（位置、状态、情绪、精力、目标）。
+func (r *NPCRepo) UpdateFull(npc *model.NPC) error {
+	return r.db.Model(npc).Updates(map[string]any{
+		"location_id":    npc.LocationID,
+		"status":         npc.Status,
+		"mood":           npc.Mood,
+		"energy":         npc.Energy,
+		"current_goal":   npc.CurrentGoal,
+		"last_active_at": npc.LastActiveAt,
+	}).Error
+}
+
+// UpdateMood 仅更新 NPC 情绪。
+func (r *NPCRepo) UpdateMood(npcID uint, mood string) error {
+	return r.db.Model(&model.NPC{}).Where("id = ?", npcID).
+		Update("mood", mood).Error
+}
+
+// UpdateGoal 仅更新 NPC 当前目标。
+func (r *NPCRepo) UpdateGoal(npcID uint, goal string) error {
+	return r.db.Model(&model.NPC{}).Where("id = ?", npcID).
+		Update("current_goal", goal).Error
+}
+
+// UpdateEnergy 仅更新 NPC 精力值。
+func (r *NPCRepo) UpdateEnergy(npcID uint, energy int) error {
+	return r.db.Model(&model.NPC{}).Where("id = ?", npcID).
+		Update("energy", energy).Error
 }
 
 // ---- NPCSchedule ----
